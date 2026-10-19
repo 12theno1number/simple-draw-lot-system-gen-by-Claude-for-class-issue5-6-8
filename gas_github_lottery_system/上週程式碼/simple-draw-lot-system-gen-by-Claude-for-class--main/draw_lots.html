@@ -1,0 +1,423 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>簡易抽籤系統</title>
+<style>
+  :root{
+    --bg:#f6f4ef; --card:#ffffff; --ink:#1f2328; --muted:#6b6f76;
+    --line:#e3dfd6; --accent:#c8402f; --accent-ink:#fff; --soft:#fbeae6;
+  }
+  @media (prefers-color-scheme: dark){
+    :root{ --bg:#17181b; --card:#212226; --ink:#ecebe8; --muted:#a0a3a9;
+           --line:#34363b; --accent:#e5604d; --soft:#3a2420; }
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);
+       font-family:"Noto Sans TC","PingFang TC","Microsoft JhengHei",system-ui,sans-serif;}
+  header{padding:24px 16px 8px;max-width:1100px;margin:auto}
+  h1{margin:0;font-size:26px;letter-spacing:.04em}
+  header p{margin:4px 0 0;color:var(--muted);font-size:14px}
+  main{max-width:1100px;margin:auto;padding:12px 16px 40px;
+       display:grid;grid-template-columns:1fr 1.2fr;gap:16px}
+  @media (max-width:820px){ main{grid-template-columns:1fr} }
+  .card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:18px}
+  .card h2{margin:0 0 12px;font-size:16px}
+  textarea{width:100%;min-height:220px;resize:vertical;border:1px solid var(--line);
+           border-radius:10px;padding:10px;font:inherit;font-size:15px;
+           background:transparent;color:var(--ink)}
+  .row{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-top:10px}
+  label.small{font-size:13px;color:var(--muted)}
+  input[type=number],select{border:1px solid var(--line);border-radius:8px;padding:6px 8px;
+       font:inherit;background:var(--card);color:var(--ink)}
+  input[type=number]{width:72px}
+  button{border:1px solid var(--line);background:var(--card);color:var(--ink);
+         padding:8px 14px;border-radius:9px;font:inherit;cursor:pointer}
+  button:hover{border-color:var(--accent)}
+  button.primary{background:var(--accent);border-color:var(--accent);color:var(--accent-ink);font-weight:600}
+  button:disabled{opacity:.45;cursor:not-allowed}
+  .drop{border:2px dashed var(--line);border-radius:10px;padding:14px;text-align:center;
+        color:var(--muted);font-size:14px;cursor:pointer;margin-bottom:10px}
+  .drop.over{border-color:var(--accent);background:var(--soft)}
+  .stage{height:150px;display:flex;align-items:center;justify-content:center;
+         border-radius:12px;background:var(--soft);font-size:clamp(28px,6vw,52px);
+         font-weight:700;text-align:center;padding:10px;word-break:break-all}
+  .stage.rolling{color:var(--muted)}
+  .meta{font-size:13px;color:var(--muted);margin-top:8px}
+  ol#results{margin:10px 0 0;padding-left:28px;max-height:320px;overflow:auto}
+  ol#results li{padding:6px 0;border-bottom:1px solid var(--line)}
+  ol#results li .t{float:right;color:var(--muted);font-size:12px}
+  .msg{font-size:13px;color:var(--accent);min-height:18px;margin-top:6px}
+</style>
+</head>
+<body>
+<header>
+  <h1>簡易抽籤系統</h1>
+  <p>輸入籤的內容（每行一個），或匯入 Excel / CSV，然後開始抽籤。完全離線可用。</p>
+</header>
+
+<main>
+  <!-- 左：輸入 -->
+  <section class="card">
+    <h2>① 籤的內容</h2>
+    <div class="drop" id="drop">拖曳 Excel (.xlsx) / CSV / TXT 到這裡，或<b>點擊選擇檔案</b>
+      <input type="file" id="file" accept=".xlsx,.xlsm,.csv,.txt,.xls" hidden>
+    </div>
+    <div class="row" id="colPick" hidden>
+      <label class="small">工作表</label><select id="sheetSel"></select>
+      <label class="small">欄位</label><select id="colSel"></select>
+      <label class="small"><input type="checkbox" id="hasHeader" checked> 第一列是標題</label>
+    </div>
+    <textarea id="items" placeholder="例如：&#10;王小明&#10;陳大文&#10;林美麗&#10;…"></textarea>
+    <div class="row">
+      <button id="dedupe">移除重複</button>
+      <button id="clearItems">清空</button>
+      <span id="count" style="color:var(--muted);font-size:13px"></span>
+    </div>
+    <div class="msg" id="msg"></div>
+  </section>
+
+  <!-- 右：抽籤 -->
+  <section class="card">
+    <h2>② 抽籤</h2>
+    <div class="stage" id="stage">準備好了</div>
+    <div class="row">
+      <label class="small">一次抽</label><input type="number" id="n" value="1" min="1">
+      <label class="small"><input type="checkbox" id="noRepeat" checked> 抽過不放回</label>
+      <label class="small"><input type="checkbox" id="anim" checked> 動畫</label>
+    </div>
+    <div class="row">
+      <button class="primary" id="drawBtn">抽籤</button>
+      <button id="orderBtn">全部排序（抽順序）</button>
+      <button id="resetBtn">重置籤筒</button>
+    </div>
+    <div class="meta" id="pool"></div>
+
+    <h2 style="margin-top:18px">③ 結果</h2>
+    <ol id="results"></ol>
+    <div class="row">
+      <button id="exportBtn">匯出 CSV</button>
+      <button id="copyBtn">複製結果</button>
+      <button id="clearRes">清除結果</button>
+    </div>
+  </section>
+</main>
+
+<!-- ===== 內建離線 Excel / CSV 讀取器（不需任何外部函式庫） ===== -->
+<script id="xlsx-lite">
+const XlsxLite = (() => {
+  /* ---- ZIP：讀取 .xlsx 內的檔案 ---- */
+  async function inflateRaw(u8){
+    const stream = new Blob([u8]).stream().pipeThrough(new DecompressionStream('deflate-raw'));
+    return new Uint8Array(await new Response(stream).arrayBuffer());
+  }
+  function readZip(buf){
+    const u8 = new Uint8Array(buf), dv = new DataView(buf);
+    let eocd = -1;
+    for (let i = u8.length - 22; i >= Math.max(0, u8.length - 65557); i--){
+      if (dv.getUint32(i, true) === 0x06054b50){ eocd = i; break; }
+    }
+    if (eocd < 0) throw new Error('不是有效的 .xlsx 檔');
+    const count = dv.getUint16(eocd + 10, true);
+    let p = dv.getUint32(eocd + 16, true);
+    const entries = {}, dec = new TextDecoder();
+    for (let k = 0; k < count; k++){
+      if (dv.getUint32(p, true) !== 0x02014b50) break;
+      const method = dv.getUint16(p + 10, true), csize = dv.getUint32(p + 20, true);
+      const nl = dv.getUint16(p + 28, true), el = dv.getUint16(p + 30, true), cl = dv.getUint16(p + 32, true);
+      const off = dv.getUint32(p + 42, true);
+      const name = dec.decode(u8.subarray(p + 46, p + 46 + nl));
+      entries[name] = { method, csize, off };
+      p += 46 + nl + el + cl;
+    }
+    return async (name) => {
+      const e = entries[name];
+      if (!e) return null;
+      const start = e.off + 30 + dv.getUint16(e.off + 26, true) + dv.getUint16(e.off + 28, true);
+      const raw = u8.subarray(start, start + e.csize);
+      const data = e.method === 0 ? raw : await inflateRaw(raw);
+      return new TextDecoder('utf-8').decode(data);
+    };
+  }
+
+  /* ---- 迷你 XML 解析器 ---- */
+  const ENT = {lt:'<', gt:'>', amp:'&', quot:'"', apos:"'"};
+  const unesc = s => s.replace(/&(#x[0-9a-f]+|#\d+|\w+);/gi, (m, e) =>
+      e[0] === '#' ? String.fromCodePoint(e[1].toLowerCase() === 'x' ? parseInt(e.slice(2), 16) : +e.slice(1))
+                   : (ENT[e] ?? m));
+  function parseXML(s){
+    const root = {name:'#root', attrs:{}, children:[]}, stack = [root];
+    const re = /<!\[CDATA\[([\s\S]*?)\]\]>|<!--[\s\S]*?-->|<\?[\s\S]*?\?>|<!DOCTYPE[^>]*>|<\/([^\s>]+)\s*>|<([^\s/>]+)([^>]*?)(\/?)>|([^<]+)/g;
+    let m;
+    while ((m = re.exec(s))){
+      const top = stack[stack.length - 1];
+      if (m[1] !== undefined) top.children.push({text: m[1]});
+      else if (m[2]) { if (stack.length > 1) stack.pop(); }
+      else if (m[3]){
+        const node = {name: m[3].split(':').pop(), attrs:{}, children:[]};
+        m[4].replace(/([^\s=]+)\s*=\s*("([^"]*)"|'([^']*)')/g, (_, k, __, a, b) => {
+          const v = unesc(a ?? b); node.attrs[k] = v; node.attrs[k.split(':').pop()] ??= v;
+        });
+        top.children.push(node);
+        if (!m[5]) stack.push(node);
+      }
+      else if (m[6]) top.children.push({text: unesc(m[6])});
+    }
+    return root;
+  }
+  const kids = (n, name) => n.children.filter(c => c.name === name);
+  function* all(n, name){ for (const c of n.children || []){ if (c.name === name) yield c; if (c.children) yield* all(c, name); } }
+  const first = (n, name) => all(n, name).next().value;
+  // 取文字（略過日文注音 rPh），並還原 Excel 的 _x000D_ 跳脫
+  function textOf(n){
+    let out = '';
+    (function walk(x){ for (const c of x.children || []){
+      if (c.text !== undefined){ if (x.name === 't' || x.name === 'v') out += c.text; }
+      else if (c.name !== 'rPh') walk(c);
+    }})(n);
+    return out.replace(/_x([0-9A-Fa-f]{4})_/g, (_, h) => String.fromCharCode(parseInt(h, 16)));
+  }
+  const colIndex = ref => { let n = 0; for (const ch of ref.replace(/\d+/g, '').toUpperCase()) n = n * 26 + ch.charCodeAt(0) - 64; return n - 1; };
+  const colName = i => { let s = ''; i++; while (i > 0){ const r = (i - 1) % 26; s = String.fromCharCode(65 + r) + s; i = Math.floor((i - 1) / 26); } return s; };
+  function resolve(base, target){
+    if (target.startsWith('/')) return target.slice(1);
+    const parts = base.split('/'); parts.pop();
+    for (const seg of target.split('/')){ if (seg === '..') parts.pop(); else if (seg !== '.') parts.push(seg); }
+    return parts.join('/');
+  }
+
+  /* ---- 讀 .xlsx → { SheetNames, data: {工作表: [[列]]} } ---- */
+  async function readXlsx(buf){
+    const get = readZip(buf);
+    const wbXml = await get('xl/workbook.xml');
+    if (!wbXml) throw new Error('找不到工作簿內容（可能不是 .xlsx）');
+    const wb = parseXML(wbXml);
+    const rels = {};
+    const relXml = await get('xl/_rels/workbook.xml.rels');
+    if (relXml) for (const r of all(parseXML(relXml), 'Relationship')) rels[r.attrs.Id] = resolve('xl/workbook.xml', r.attrs.Target);
+    const ssXml = await get('xl/sharedStrings.xml');
+    const shared = ssXml ? [...all(parseXML(ssXml), 'si')].map(textOf) : [];
+
+    const SheetNames = [], data = {};
+    let idx = 1;
+    for (const sh of all(wb, 'sheet')){
+      const name = sh.attrs.name;
+      const path = rels[sh.attrs['r:id'] ?? sh.attrs.id] || `xl/worksheets/sheet${idx}.xml`;
+      idx++;
+      const xml = await get(path);
+      if (!xml) continue; // 圖表工作表等
+      const rows = [];
+      let rAuto = 0;
+      for (const row of all(parseXML(xml), 'row')){
+        const r = row.attrs.r ? +row.attrs.r - 1 : rAuto;
+        rAuto = r + 1;
+        const cells = [];
+        let cAuto = 0;
+        for (const c of kids(row, 'c')){
+          const ci = c.attrs.r ? colIndex(c.attrs.r) : cAuto;
+          cAuto = ci + 1;
+          const t = c.attrs.t, v = first(c, 'v');
+          let val = '';
+          if (t === 's') val = v ? (shared[+textOf(v)] ?? '') : '';
+          else if (t === 'inlineStr') { const is = first(c, 'is'); val = is ? textOf(is) : ''; }
+          else if (t === 'b') val = v && textOf(v) === '1' ? 'TRUE' : 'FALSE';
+          else val = v ? textOf(v) : '';
+          cells[ci] = val;
+        }
+        rows[r] = Array.from(cells, x => x ?? '');
+      }
+      SheetNames.push(name);
+      data[name] = rows.filter(r => r && r.some(x => String(x).trim() !== ''));
+    }
+    return { SheetNames, data };
+  }
+
+  /* ---- 文字解碼：先試 UTF-8，失敗改 Big5（台灣版 Excel 存的 CSV 常是 Big5） ---- */
+  function decodeText(buf){
+    try { return new TextDecoder('utf-8', {fatal:true}).decode(buf).replace(/^﻿/, ''); }
+    catch { return new TextDecoder('big5').decode(buf); }
+  }
+
+  /* ---- CSV 解析（支援引號、逗號與換行） ---- */
+  function parseCSV(text){
+    const rows = []; let row = [], cell = '', q = false;
+    for (let i = 0; i < text.length; i++){
+      const ch = text[i];
+      if (q){
+        if (ch === '"'){ if (text[i + 1] === '"'){ cell += '"'; i++; } else q = false; }
+        else cell += ch;
+      } else if (ch === '"') q = true;
+      else if (ch === ',') { row.push(cell); cell = ''; }
+      else if (ch === '\n' || ch === '\r'){
+        if (ch === '\r' && text[i + 1] === '\n') i++;
+        row.push(cell); rows.push(row); row = []; cell = '';
+      } else cell += ch;
+    }
+    if (cell !== '' || row.length){ row.push(cell); rows.push(row); }
+    return rows.filter(r => r.some(x => x.trim() !== ''));
+  }
+
+  return { readXlsx, parseCSV, decodeText, colName };
+})();
+</script>
+
+<!-- ===== 抽籤主程式 ===== -->
+<script>
+const $ = id => document.getElementById(id);
+const itemsEl = $('items');
+let remaining = [];          // 籤筒中剩下的籤
+let results = [];            // {no, value, time}
+let book = null;             // { SheetNames, data }
+let rolling = false;
+
+/* ---------- 籤的內容 ---------- */
+const parseItems = () => itemsEl.value.split(/\r?\n/).map(s => s.trim()).filter(Boolean);
+
+function syncPool(){
+  const all = parseItems();
+  $('count').textContent = `共 ${all.length} 支籤`;
+  if ($('noRepeat').checked){
+    const used = {};
+    results.forEach(r => used[r.value] = (used[r.value] || 0) + 1);
+    remaining = all.filter(v => used[v] ? (used[v]--, false) : true);
+  } else remaining = all.slice();
+  $('pool').textContent = `籤筒剩餘：${remaining.length} 支`;
+  $('drawBtn').disabled = $('orderBtn').disabled = remaining.length === 0 || rolling;
+}
+itemsEl.addEventListener('input', syncPool);
+$('noRepeat').addEventListener('change', syncPool);
+
+$('dedupe').onclick = () => { itemsEl.value = [...new Set(parseItems())].join('\n'); syncPool(); };
+$('clearItems').onclick = () => { itemsEl.value = ''; syncPool(); };
+
+/* ---------- 檔案匯入 ---------- */
+const drop = $('drop'), fileIn = $('file');
+drop.onclick = () => fileIn.click();
+drop.ondragover = e => { e.preventDefault(); drop.classList.add('over'); };
+drop.ondragleave = () => drop.classList.remove('over');
+drop.ondrop = e => { e.preventDefault(); drop.classList.remove('over'); if (e.dataTransfer.files[0]) loadFile(e.dataTransfer.files[0]); };
+fileIn.onchange = () => { if (fileIn.files[0]) loadFile(fileIn.files[0]); fileIn.value = ''; };
+
+function say(t){ $('msg').textContent = t; }
+
+async function loadFile(f){
+  const ext = f.name.split('.').pop().toLowerCase();
+  try{
+    const buf = await f.arrayBuffer();
+    if (ext === 'xls'){
+      say('不支援舊版 .xls，請在 Excel 用「另存新檔」存成 .xlsx 或 CSV 再匯入。'); return;
+    }
+    if (ext === 'txt'){
+      itemsEl.value = XlsxLite.decodeText(buf); $('colPick').hidden = true; book = null;
+      syncPool(); say(`已載入 ${f.name}`); return;
+    }
+    if (ext === 'csv'){
+      book = { SheetNames: [f.name], data: { [f.name]: XlsxLite.parseCSV(XlsxLite.decodeText(buf)) } };
+    } else {
+      book = await XlsxLite.readXlsx(buf);
+    }
+    if (!book.SheetNames.length) { say('檔案中沒有可讀的工作表'); return; }
+    $('sheetSel').innerHTML = book.SheetNames.map(n => `<option>${esc(n)}</option>`).join('');
+    $('colPick').hidden = false;
+    fillColumns();
+    say(`已載入 ${f.name}，可選擇工作表與欄位`);
+  }catch(err){
+    say('檔案讀取失敗：' + err.message);
+  }
+}
+
+const sheetRows = () => book.data[$('sheetSel').value] || [];
+function fillColumns(){
+  const rows = sheetRows();
+  const width = Math.max(1, ...rows.map(r => r.length));
+  const head = rows[0] || [];
+  $('colSel').innerHTML = Array.from({length: width}, (_, i) => {
+    const letter = XlsxLite.colName(i);
+    const label = $('hasHeader').checked && String(head[i] ?? '').trim() !== '' ? `${letter}：${head[i]}` : letter;
+    return `<option value="${i}">${esc(label)}</option>`;
+  }).join('');
+  applyColumn();
+}
+function applyColumn(){
+  const rows = sheetRows(), c = +$('colSel').value || 0;
+  const body = $('hasHeader').checked ? rows.slice(1) : rows;
+  itemsEl.value = body.map(r => String(r[c] ?? '').trim()).filter(Boolean).join('\n');
+  syncPool();
+}
+$('sheetSel').onchange = fillColumns;
+$('colSel').onchange = applyColumn;
+$('hasHeader').onchange = () => { if (book) fillColumns(); };
+
+/* ---------- 抽籤 ---------- */
+function randInt(max){ // 無偏差的加密等級亂數
+  const limit = Math.floor(0x100000000 / max) * max, a = new Uint32Array(1);
+  do crypto.getRandomValues(a); while (a[0] >= limit);
+  return a[0] % max;
+}
+function shuffle(arr){
+  const a = arr.slice();
+  for (let i = a.length - 1; i > 0; i--){ const j = randInt(i + 1); [a[i], a[j]] = [a[j], a[i]]; }
+  return a;
+}
+
+function draw(count, forceNoRepeat = false){
+  syncPool();
+  const noRep = forceNoRepeat || $('noRepeat').checked;
+  let pool = remaining;
+  if (forceNoRepeat && !$('noRepeat').checked){ // 排順序：從尚未抽出的籤中排
+    const used = {};
+    results.forEach(r => used[r.value] = (used[r.value] || 0) + 1);
+    pool = parseItems().filter(v => used[v] ? (used[v]--, false) : true);
+  }
+  if (noRep) count = Math.min(count, pool.length);
+  if (!pool.length || count < 1) return;
+  const picks = noRep ? shuffle(pool).slice(0, count)
+                      : Array.from({length: count}, () => pool[randInt(pool.length)]);
+  const show = () => {
+    const now = new Date().toLocaleTimeString('zh-TW', {hour12:false});
+    picks.forEach(v => results.push({no: results.length + 1, value: v, time: now}));
+    $('stage').classList.remove('rolling');
+    $('stage').textContent = picks.length > 3 ? `抽出 ${picks.length} 支` : picks.join('、');
+    renderResults(); rolling = false; syncPool();
+  };
+  if (!$('anim').checked) return show();
+  rolling = true; syncPool();
+  $('stage').classList.add('rolling');
+  let t = 0;
+  const tick = () => {
+    $('stage').textContent = pool[randInt(pool.length)];
+    if (++t < 22) setTimeout(tick, 40 + t * 6); else show();
+  };
+  tick();
+}
+$('drawBtn').onclick = () => draw(Math.max(1, parseInt($('n').value) || 1));
+$('orderBtn').onclick = () => draw(Infinity, true);
+$('resetBtn').onclick = () => { results = []; renderResults(); $('stage').textContent = '準備好了'; syncPool(); };
+
+/* ---------- 結果 ---------- */
+function renderResults(){
+  $('results').innerHTML = results.map(r => `<li>${esc(r.value)}<span class="t">${r.time}</span></li>`).join('');
+  $('results').scrollTop = $('results').scrollHeight;
+}
+$('clearRes').onclick = $('resetBtn').onclick;
+
+$('exportBtn').onclick = () => {
+  if (!results.length) return say('還沒有結果可以匯出');
+  const csv = '﻿順序,內容,時間\n' + results.map(r => `${r.no},"${String(r.value).replace(/"/g, '""')}",${r.time}`).join('\n');
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([csv], {type: 'text/csv'}));
+  const d = new Date(), p = n => String(n).padStart(2, '0');
+  a.download = `抽籤結果_${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}_${p(d.getHours())}${p(d.getMinutes())}.csv`;
+  a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+};
+$('copyBtn').onclick = async () => {
+  try{ await navigator.clipboard.writeText(results.map(r => `${r.no}. ${r.value}`).join('\n')); say('已複製'); }
+  catch{ say('無法複製，請手動選取'); }
+};
+
+function esc(s){ return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+syncPool();
+</script>
+</body>
+</html>
